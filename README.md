@@ -10,6 +10,11 @@ This directory contains a Lua SDK implementation for LinuxDoSpace mail stream pr
 - Local bind (exact/regex), ordered matching, `allow_overlap`
 - `route`, `close`
 
+## Protocol Notes
+
+- `raw_message_base64` is decoded into the original raw mail payload before dispatch.
+- NDJSON parsing keeps an internal line buffer so HTTP chunk boundaries do not split valid events.
+
 ## Runtime Dependencies
 
 - `lua-http` (`http.request`)

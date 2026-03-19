@@ -36,7 +36,11 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
 
       - name: Install Lua
-        run: sudo apt-get update && sudo apt-get install -y lua5.4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4 luarocks
+          sudo luarocks install dkjson
+          sudo luarocks install lua-http
 
       - name: Resolve release tag
         id: meta
@@ -51,7 +55,9 @@ jobs:
           echo "release_tag=${release_tag}" >>"$GITHUB_OUTPUT"
 
       - name: Check syntax
-        run: lua5.4 -e "assert(loadfile('linuxdospace/init.lua'))"
+        run: |
+          lua5.4 -e "assert(loadfile('linuxdospace/init.lua'))"
+          lua5.4 -e "local m = require('linuxdospace'); assert(m.Client ~= nil)"
 
       - name: Create source archive
         shell: bash

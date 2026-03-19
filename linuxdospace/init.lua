@@ -85,6 +85,49 @@ end
 
 local Client = class("Client")
 
+local function base64_decode(value)
+  local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+  local lookup = {}
+  for i = 1, #alphabet do
+    lookup[alphabet:sub(i, i)] = i - 1
+  end
+
+  local cleaned = value:gsub("%s+", "")
+  if cleaned == "" or (#cleaned % 4) ~= 0 then
+    return nil, "invalid base64 length"
+  end
+
+  local out = {}
+  local i = 1
+  while i <= #cleaned do
+    local a = cleaned:sub(i, i)
+    local b = cleaned:sub(i + 1, i + 1)
+    local c = cleaned:sub(i + 2, i + 2)
+    local d = cleaned:sub(i + 3, i + 3)
+    local av = lookup[a]
+    local bv = lookup[b]
+    local cv = c == "=" and nil or lookup[c]
+    local dv = d == "=" and nil or lookup[d]
+    if av == nil or bv == nil or (c ~= "=" and cv == nil) or (d ~= "=" and dv == nil) then
+      return nil, "invalid base64 character"
+    end
+
+    local first = av * 4 + math.floor(bv / 16)
+    out[#out + 1] = string.char(first)
+    if c ~= "=" then
+      local second = (bv % 16) * 16 + math.floor(cv / 4)
+      out[#out + 1] = string.char(second)
+    end
+    if d ~= "=" and c ~= "=" then
+      local third = (cv % 4) * 64 + dv
+      out[#out + 1] = string.char(third)
+    end
+    i = i + 4
+  end
+
+  return table.concat(out), nil
+end
+
 local function is_local_host(host)
   return host == "localhost" or host == "127.0.0.1" or host == "::1" or host:match("%.localhost$")
 end
@@ -189,8 +232,11 @@ local function parse_mail_message(payload)
   if raw_message_base64 == "" then
     error(StreamError("mail event did not include raw_message_base64"))
   end
-  local raw_bytes = raw_message_base64
-  local raw = raw_message_base64
+  local raw_bytes, decode_error = base64_decode(raw_message_base64)
+  if raw_bytes == nil then
+    error(StreamError("mail event contained invalid base64 message data", decode_error))
+  end
+  local raw = raw_bytes
   return {
     sender = tostring(payload.original_envelope_from or ""),
     recipients = recipients,
@@ -262,50 +308,68 @@ function Client:start()
     error(StreamError("unexpected stream status code: " .. tostring(status)))
   end
 
+  local buffer = ""
   for chunk in stream:each_chunk() do
     if self._closed then
       return
     end
-    for line in tostring(chunk):gmatch("[^\r\n]+") do
-      local ok, node = pcall(json.decode, line)
-      if ok and node and type(node) == "table" then
-        local t = tostring(node.type or "")
-        if t == "mail" then
-          local parsed = parse_mail_message(node)
-          local primary = parsed.recipients[1] or ""
-          local msg = {
-            address = primary,
-            sender = parsed.sender,
-            recipients = parsed.recipients,
-            received_at = parsed.received_at,
-            subject = "",
-            message_id = nil,
-            date = nil,
-            from_header = "",
-            to_header = "",
-            cc_header = "",
-            reply_to_header = "",
-            from_addresses = {},
-            to_addresses = {},
-            cc_addresses = {},
-            reply_to_addresses = {},
-            text = parsed.raw,
-            html = "",
-            headers = {},
-            raw = parsed.raw,
-            raw_bytes = parsed.raw_bytes,
-          }
-          for i = 1, #self._full_callbacks do
-            self._full_callbacks[i](msg)
-          end
-          local delivered = {}
-          for i = 1, #parsed.recipients do
-            local address = parsed.recipients[i]
-            if not delivered[address] then
-              delivered[address] = true
-              local targets = self:route({ address = address })
-              for j = 1, #targets do
-                targets[j]:_enqueue(msg)
+    buffer = buffer .. tostring(chunk)
+    while true do
+      local newline_start, newline_end = buffer:find("\n", 1, true)
+      if newline_start == nil then
+        break
+      end
+      local line = buffer:sub(1, newline_start - 1):gsub("\r$", "")
+      buffer = buffer:sub(newline_end + 1)
+      if line ~= "" then
+        local node, _, decode_error = json.decode(line, 1, nil)
+        if node == nil then
+          error(StreamError("received invalid JSON from stream", decode_error))
+        end
+        if type(node) == "table" then
+          local t = tostring(node.type or "")
+          if t == "mail" then
+            local parsed = parse_mail_message(node)
+            local primary = parsed.recipients[1] or ""
+            local msg = {
+              address = primary,
+              sender = parsed.sender,
+              recipients = parsed.recipients,
+              received_at = parsed.received_at,
+              subject = "",
+              message_id = nil,
+              date = nil,
+              from_header = "",
+              to_header = "",
+              cc_header = "",
+              reply_to_header = "",
+              from_addresses = {},
+              to_addresses = {},
+              cc_addresses = {},
+              reply_to_addresses = {},
+              text = parsed.raw,
+              html = "",
+              headers = {},
+              raw = parsed.raw,
+              raw_bytes = parsed.raw_bytes,
+            }
+            for i = 1, #self._full_callbacks do
+              self._full_callbacks[i](msg)
+            end
+            local delivered = {}
+            for i = 1, #parsed.recipients do
+              local address = parsed.recipients[i]
+              if not delivered[address] then
+                delivered[address] = true
+                local per_recipient = {}
+                for k, v in pairs(msg) do
+                  per_recipient[k] = v
+                end
+                per_recipient.address = address
+                local targets = self:route({ address = address })
+                for j = 1, #targets do
+                  targets[j]:_enqueue(per_recipient)
+                end
               end
             end
           end
