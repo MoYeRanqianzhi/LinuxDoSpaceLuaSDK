@@ -7,7 +7,7 @@ This directory contains a Lua SDK implementation for LinuxDoSpace mail stream pr
 - `Client`, `Suffix`, `MailMessage` data shape
 - Errors: authentication and stream error helpers
 - Full token stream listener callback
-- Local bind (exact/regex), ordered matching, `allow_overlap`
+- Local bind (exact/Lua pattern), ordered matching, `allow_overlap`
 - `route`, `close`
 
 ## Protocol Notes
