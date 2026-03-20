@@ -4,6 +4,9 @@ local json = require("dkjson")
 local M = {}
 
 M.Suffix = {
+  -- linuxdo_space is semantic rather than literal: bindings resolve against
+  -- "<owner_username>.linuxdo.space" after the ready event provides
+  -- owner_username.
   linuxdo_space = "linuxdo.space",
 }
 
@@ -161,6 +164,7 @@ function Client.new(opts)
     _base_url = normalize_base_url(opts.base_url or "https://api.linuxdo.space"),
     _bindings = {},
     _full_callbacks = {},
+    _owner_username = nil,
     _closed = false,
   }
   return setmetatable(o, Client)
@@ -252,7 +256,14 @@ function Client:route(message)
   if not local_part or not suffix then
     return {}
   end
-  local chain = self._bindings[suffix] or {}
+  local chain = self._bindings[suffix]
+  if chain == nil and self._owner_username ~= nil then
+    local semantic_suffix = self._owner_username .. "." .. M.Suffix.linuxdo_space
+    if suffix == semantic_suffix then
+      chain = self._bindings[M.Suffix.linuxdo_space]
+    end
+  end
+  chain = chain or {}
   local out = {}
   for i = 1, #chain do
     local binding = chain[i]
@@ -328,7 +339,15 @@ function Client:start()
         end
         if type(node) == "table" then
           local t = tostring(node.type or "")
-          if t == "mail" then
+          if t == "ready" then
+            local owner_username = tostring(node.owner_username or ""):gsub("%s+$", ""):gsub("^%s+", ""):lower()
+            if owner_username == "" then
+              error(StreamError("ready event did not include owner_username"))
+            end
+            self._owner_username = owner_username
+          elseif t == "heartbeat" then
+            -- Intentionally ignored.
+          elseif t == "mail" then
             local parsed = parse_mail_message(node)
             local primary = parsed.recipients[1] or ""
             local msg = {

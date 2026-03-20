@@ -10,6 +10,11 @@ This directory contains a Lua SDK implementation for LinuxDoSpace mail stream pr
 - Local bind (exact/Lua pattern), ordered matching, `allow_overlap`
 - `route`, `close`
 
+Important:
+
+- `lds.Suffix.linuxdo_space` is semantic, not literal
+- the SDK resolves it to `<owner_username>.linuxdo.space` after `ready.owner_username`
+
 ## Protocol Notes
 
 - `raw_message_base64` is decoded into the original raw mail payload before dispatch.
