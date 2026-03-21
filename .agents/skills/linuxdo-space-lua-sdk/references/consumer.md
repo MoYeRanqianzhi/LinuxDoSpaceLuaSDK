@@ -49,4 +49,3 @@ end)
 - The stream starts on `client:start()`, not on `Client.new(...)`.
 - Mailbox queues activate only after `mailbox:listen(...)`.
 - `client:route({ address = ... })` is local matching only.
-

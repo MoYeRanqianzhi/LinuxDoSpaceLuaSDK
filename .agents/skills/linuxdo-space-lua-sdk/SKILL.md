@@ -31,4 +31,3 @@ Read [references/development.md](references/development.md) only when editing `s
 - Do not claim the stream opens automatically during `Client.new(...)`.
 - Do not claim a public mailbox single-listener guard that the current Lua code does not implement.
 - Do not document public registry publication; current release path is GitHub assets plus rockspec files.
-

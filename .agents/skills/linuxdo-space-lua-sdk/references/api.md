@@ -33,4 +33,3 @@
 - `client:route(...)` only uses the current `address`.
 - Full-stream `msg.address` is the first recipient projection.
 - Mailbox delivery rewrites `address` to the matched recipient projection.
-

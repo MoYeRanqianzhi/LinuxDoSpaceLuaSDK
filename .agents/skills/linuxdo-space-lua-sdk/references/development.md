@@ -26,4 +26,3 @@ lua5.4 -e "local m = require('linuxdospace'); assert(m.Client ~= nil)"
 - `../../../README.md`
 - `../../../.github/workflows/ci.yml`
 - `../../../.github/workflows/release.yml`
-

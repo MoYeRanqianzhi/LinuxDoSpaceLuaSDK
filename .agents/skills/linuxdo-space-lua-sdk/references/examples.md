@@ -27,4 +27,3 @@ local catch_all = client:bind({
   allow_overlap = true,
 })
 ```
-
