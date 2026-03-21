@@ -22,12 +22,30 @@ Important:
 
 ## Runtime Dependencies
 
+- Lua 5.4
+- `liblua5.4-dev` when installing dependencies through LuaRocks on Debian/Ubuntu style systems
+- LuaRocks
 - `http` (`http.request`)
 - `dkjson`
+
+Recommended local verification commands:
+
+```bash
+lua5.4 -e "assert(loadfile('linuxdospace/init.lua'))"
+lua5.4 -e "local m = require('linuxdospace'); assert(m.Client ~= nil)"
+```
 
 ## Local Verification Status
 
 Current environment does not have Lua runtime/toolchain installed, so this SDK was not run locally in this session.
+
+## Release Model
+
+- The repository root keeps `linuxdospace-scm-1.rockspec` as the development snapshot metadata.
+- Tagged GitHub releases publish:
+  - one source archive such as `linuxdospace-lua-v0.1.2.tar.gz`
+  - one versioned rockspec such as `linuxdospace-0.1.2-1.rockspec`
+- When consuming a tagged release, prefer the versioned release rockspec over the repository's `scm-1` rockspec.
 
 ## Example
 

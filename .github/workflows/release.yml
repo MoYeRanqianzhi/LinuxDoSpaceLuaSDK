@@ -59,13 +59,37 @@ jobs:
           lua5.4 -e "assert(loadfile('linuxdospace/init.lua'))"
           lua5.4 -e "local m = require('linuxdospace'); assert(m.Client ~= nil)"
 
-      - name: Create source archive
+      - name: Create release artifacts
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
         run: |
           mkdir -p release-artifacts
+          package_version="${RELEASE_TAG#v}"
           git archive --format=tar.gz --output "release-artifacts/linuxdospace-lua-${RELEASE_TAG}.tar.gz" HEAD
+          cat > "release-artifacts/linuxdospace-${package_version}-1.rockspec" <<EOF
+          package = "linuxdospace"
+          version = "${package_version}-1"
+          source = {
+            url = "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
+          }
+          description = {
+            summary = "LinuxDoSpace Lua SDK",
+            detailed = "Lua SDK for LinuxDoSpace token email stream with local mailbox routing.",
+            license = "MIT"
+          }
+          dependencies = {
+            "lua >= 5.1",
+            "http",
+            "dkjson"
+          }
+          build = {
+            type = "builtin",
+            modules = {
+              ["linuxdospace"] = "linuxdospace/init.lua"
+            }
+          }
+          EOF
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v6
