@@ -1,0 +1,4 @@
+interface:
+  display_name: "LinuxDoSpace Lua SDK"
+  short_description: "Use or maintain the LinuxDoSpace Lua SDK"
+  default_prompt: "Use $linuxdo-space-lua-sdk when writing consumer code against sdk/lua or when updating the LinuxDoSpace Lua SDK with matching docs and validation guidance."
