@@ -22,7 +22,7 @@ Important:
 
 ## Runtime Dependencies
 
-- `lua-http` (`http.request`)
+- `http` (`http.request`)
 - `dkjson`
 
 ## Local Verification Status
