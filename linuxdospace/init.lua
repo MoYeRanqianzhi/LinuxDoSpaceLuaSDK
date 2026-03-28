@@ -4,11 +4,48 @@ local json = require("dkjson")
 local M = {}
 
 M.Suffix = {
-  -- linuxdo_space is semantic rather than literal: bindings resolve against
-  -- "<owner_username>.linuxdo.space" after the ready event provides
-  -- owner_username.
+  -- linuxdo_space is semantic rather than literal: bindings resolve it to the
+  -- current token owner's canonical `@<owner>-mail.linuxdo.space` namespace.
   linuxdo_space = "linuxdo.space",
 }
+
+local function normalize_mail_suffix_fragment(raw)
+  local value = tostring(raw or ""):gsub("%s+$", ""):gsub("^%s+", ""):lower()
+  if value == "" then
+    return ""
+  end
+  local out = {}
+  local last_was_dash = false
+  for i = 1, #value do
+    local ch = value:sub(i, i)
+    if ch:match("[a-z0-9]") then
+      out[#out + 1] = ch
+      last_was_dash = false
+    elseif not last_was_dash then
+      out[#out + 1] = "-"
+      last_was_dash = true
+    end
+  end
+  local normalized = table.concat(out):gsub("^-+", ""):gsub("-+$", "")
+  if normalized == "" then
+    error("mail suffix fragment does not contain any valid dns characters")
+  end
+  if normalized:find("%.", 1, true) then
+    error("mail suffix fragment must stay inside one dns label")
+  end
+  if #normalized > 48 then
+    error("mail suffix fragment must be 48 characters or fewer")
+  end
+  return normalized
+end
+
+function M.semantic_suffix(base, fragment)
+  return {
+    __linuxdospace_semantic_suffix = true,
+    base = tostring(base or ""):lower(),
+    mail_suffix_fragment = normalize_mail_suffix_fragment(fragment or ""),
+  }
+end
 
 local function class(name)
   local c = {}
@@ -166,6 +203,7 @@ function Client.new(opts)
     _full_callbacks = {},
     _owner_username = nil,
     _closed = false,
+    _synced_mailbox_suffix_fragments = nil,
   }
   return setmetatable(o, Client)
 end
@@ -183,7 +221,7 @@ function Client:bind(opts)
   if (has_prefix and has_pattern) or (not has_prefix and not has_pattern) then
     error("exactly one of prefix or pattern must be provided")
   end
-  local suffix = (opts.suffix or M.Suffix.linuxdo_space):lower()
+  local suffix = self:_resolve_binding_suffix(opts.suffix or M.Suffix.linuxdo_space)
   local mode = has_prefix and "exact" or "pattern"
   local normalized_prefix = has_prefix and prefix:lower() or nil
   local regex = has_pattern and ("^" .. pattern .. "$") or nil
@@ -209,6 +247,7 @@ function Client:bind(opts)
       else
         self._bindings[suffix] = next_chain
       end
+      self:_sync_remote_mailbox_filters(false)
     end,
   })
 
@@ -220,6 +259,7 @@ function Client:bind(opts)
   binding.mailbox = mailbox
   self._bindings[suffix] = self._bindings[suffix] or {}
   table.insert(self._bindings[suffix], binding)
+  self:_sync_remote_mailbox_filters(true)
   return mailbox
 end
 
@@ -259,8 +299,9 @@ function Client:route(message)
   local chain = self._bindings[suffix]
   if chain == nil and self._owner_username ~= nil then
     local semantic_suffix = self._owner_username .. "." .. M.Suffix.linuxdo_space
+    local semantic_mail_suffix = self._owner_username .. "-mail." .. M.Suffix.linuxdo_space
     if suffix == semantic_suffix then
-      chain = self._bindings[M.Suffix.linuxdo_space]
+      chain = self._bindings[semantic_mail_suffix]
     end
   end
   chain = chain or {}
@@ -295,6 +336,124 @@ function Client:close()
     end
   end
   self._bindings = {}
+end
+
+function Client:_resolve_binding_suffix(raw_suffix)
+  if type(raw_suffix) == "table" and raw_suffix.__linuxdospace_semantic_suffix then
+    local base = tostring(raw_suffix.base or ""):lower()
+    if base == "" then
+      error("suffix must not be empty")
+    end
+    if base ~= M.Suffix.linuxdo_space then
+      return base
+    end
+    local owner = tostring(self._owner_username or ""):lower()
+    if owner == "" then
+      if raw_suffix.mail_suffix_fragment == "" then
+        error(StreamError("stream bootstrap did not provide owner_username required to resolve Suffix.linuxdo_space"))
+      end
+      error(StreamError("stream bootstrap did not provide owner_username required to resolve semantic_suffix(...).with_suffix"))
+    end
+    return owner .. "-mail" .. tostring(raw_suffix.mail_suffix_fragment or "") .. "." .. base
+  end
+
+  local suffix = tostring(raw_suffix or ""):gsub("%s+$", ""):gsub("^%s+", ""):lower()
+  if suffix == "" then
+    error("suffix must not be empty")
+  end
+  if suffix ~= M.Suffix.linuxdo_space then
+    return suffix
+  end
+  local owner = tostring(self._owner_username or ""):lower()
+  if owner == "" then
+    error(StreamError("stream bootstrap did not provide owner_username required to resolve Suffix.linuxdo_space"))
+  end
+  return owner .. "-mail." .. suffix
+end
+
+function Client:_collect_remote_mailbox_suffix_fragments()
+  local owner = tostring(self._owner_username or ""):lower()
+  if owner == "" then
+    return {}
+  end
+  local fragments = {}
+  local seen = {}
+  local root_suffix = "." .. M.Suffix.linuxdo_space
+  local canonical_prefix = owner .. "-mail"
+  for suffix, _ in pairs(self._bindings) do
+    local normalized = tostring(suffix or ""):lower()
+    if normalized:sub(-#root_suffix) == root_suffix then
+      local label = normalized:sub(1, #normalized - #root_suffix)
+      if not label:find("%.", 1, true) and label:sub(1, #canonical_prefix) == canonical_prefix then
+        local fragment = label:sub(#canonical_prefix + 1)
+        if not seen[fragment] then
+          seen[fragment] = true
+          fragments[#fragments + 1] = fragment
+        end
+      end
+    end
+  end
+  table.sort(fragments)
+  return fragments
+end
+
+function Client:_sync_remote_mailbox_filters(strict)
+  if self._closed then
+    return
+  end
+  local owner = tostring(self._owner_username or ""):lower()
+  if owner == "" then
+    return
+  end
+
+  local fragments = self:_collect_remote_mailbox_suffix_fragments()
+  if #fragments == 0 and self._synced_mailbox_suffix_fragments == nil then
+    return
+  end
+
+  local same = self._synced_mailbox_suffix_fragments ~= nil
+  if same then
+    if #self._synced_mailbox_suffix_fragments ~= #fragments then
+      same = false
+    else
+      for i = 1, #fragments do
+        if self._synced_mailbox_suffix_fragments[i] ~= fragments[i] then
+          same = false
+          break
+        end
+      end
+    end
+  end
+  if same then
+    return
+  end
+
+  local req = request.new_from_uri(self._base_url .. "/v1/token/email/filters")
+  req.headers:upsert(":method", "PUT")
+  req.headers:upsert("authorization", "Bearer " .. self._token)
+  req.headers:upsert("accept", "application/json")
+  req.headers:upsert("content-type", "application/json")
+  req:set_body(json.encode({ suffixes = fragments }))
+  local headers, stream = req:go()
+  if not headers then
+    if strict then
+      error(StreamError("failed to synchronize remote mailbox filters"))
+    end
+    return
+  end
+  local status = tonumber(tostring(headers:get(":status") or "0")) or 0
+  if status < 200 or status > 299 then
+    if strict then
+      error(StreamError("unexpected mailbox filter sync status code: " .. tostring(status)))
+    end
+    return
+  end
+  if stream then
+    for _ in stream:each_chunk() do
+      break
+    end
+  end
+  self._synced_mailbox_suffix_fragments = fragments
 end
 
 function Client:start()
@@ -345,6 +504,7 @@ function Client:start()
               error(StreamError("ready event did not include owner_username"))
             end
             self._owner_username = owner_username
+            self:_sync_remote_mailbox_filters(true)
           elseif t == "heartbeat" then
             -- Intentionally ignored.
           elseif t == "mail" then

@@ -13,7 +13,16 @@ This directory contains a Lua SDK implementation for LinuxDoSpace mail stream pr
 Important:
 
 - `lds.Suffix.linuxdo_space` is semantic, not literal
-- the SDK resolves it to `<owner_username>.linuxdo.space` after `ready.owner_username`
+- `lds.Suffix.linuxdo_space` now resolves to the current token owner's
+  canonical mail namespace: `<owner_username>-mail.linuxdo.space`
+- `lds.semantic_suffix(lds.Suffix.linuxdo_space, "foo")` resolves to
+  `<owner_username>-mailfoo.linuxdo.space`
+- active semantic `-mail<suffix>` registrations are synchronized to
+  `PUT /v1/token/email/filters`
+- the legacy default alias `<owner_username>.linuxdo.space` still matches the
+  default semantic binding automatically
+- consumer code should keep using `lds.Suffix.linuxdo_space` instead of
+  hardcoding a concrete `*-mail.linuxdo.space` namespace
 
 ## Protocol Notes
 
